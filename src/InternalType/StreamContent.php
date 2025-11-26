@@ -24,8 +24,6 @@ class StreamContent extends AbstractTypeObject
 {
     /**
      * Object value
-     *
-     * @var \Laminas\Memory\Container\AbstractContainer
      */
     public $value;
 
@@ -36,7 +34,7 @@ class StreamContent extends AbstractTypeObject
      */
     public function __construct($val)
     {
-        $this->value = Pdf\PdfDocument::getMemoryManager()->create($val);
+        $this->value = $val;
     }
 
     /**
@@ -57,7 +55,7 @@ class StreamContent extends AbstractTypeObject
      */
     public function length()
     {
-        return strlen($this->value->getRef());
+        return strlen($this->value);
     }
 
     /**
@@ -66,9 +64,7 @@ class StreamContent extends AbstractTypeObject
      */
     public function clear()
     {
-        $ref = &$this->value->getRef();
-        $ref = '';
-        $this->value->touch();
+        $this->value = '';
     }
 
     /**
@@ -78,9 +74,7 @@ class StreamContent extends AbstractTypeObject
      */
     public function append($val)
     {
-        $ref = &$this->value->getRef();
-        $ref .= (string)$val;
-        $this->value->touch();
+        $this->value .= (string)$val;
     }
 
     /**
@@ -93,7 +87,7 @@ class StreamContent extends AbstractTypeObject
      */
     public function makeClone(Pdf\ObjectFactory $factory, array &$processed, $mode)
     {
-        return new self($this->value->getRef());
+        return new self($this->value);
     }
 
     /**
@@ -104,6 +98,6 @@ class StreamContent extends AbstractTypeObject
      */
     public function toString(Pdf\ObjectFactory $factory = null)
     {
-        return "stream\n" . $this->value->getRef() . "\nendstream";
+        return "stream\n" . $this->value . "\nendstream";
     }
 }

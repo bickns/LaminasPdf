@@ -45,8 +45,6 @@ class UpdateInfoContainer
 
     /**
      * String representation of the object
-     *
-     * @var \Laminas\Memory\Container\AbstractContainer|null
      */
     private $_dump = null;
 
@@ -62,11 +60,7 @@ class UpdateInfoContainer
         $this->_isFree = $isFree;
 
         if ($dump !== null) {
-            if (strlen($dump) > 1024) {
-                $this->_dump = Pdf\PdfDocument::getMemoryManager()->create($dump);
-            } else {
-                $this->_dump = $dump;
-            }
+            $this->_dump = $dump;
         }
     }
 
@@ -112,10 +106,6 @@ class UpdateInfoContainer
             return '';
         }
 
-        if (is_string($this->_dump)) {
-            return $this->_dump;
-        }
-
-        return $this->_dump->getRef();
+        return $this->_dump;
     }
 }

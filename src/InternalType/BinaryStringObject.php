@@ -69,7 +69,7 @@ class BinaryStringObject extends StringObject
             $chunks[] = '0';
         }
 
-        return pack('H*', implode($chunks));
+        return pack('H*', implode('', $chunks));
     }
 
 

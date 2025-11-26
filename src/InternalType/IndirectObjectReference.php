@@ -185,13 +185,8 @@ class IndirectObjectReference extends AbstractTypeObject
         // This code duplicates code in \LaminasPdf\InternalType\IndirectObject class,
         // but allows to avoid unnecessary method call in most cases
         $id = spl_object_hash($this->_ref);
-        if (isset($processed[$id])) {
-            // Do nothing if object is already processed
-            // return it
-            return $processed[$id];
-        }
 
-        return $this->_ref->makeClone($factory, $processed, $mode);
+        return $processed[$id] ?? $this->_ref->makeClone($factory, $processed, $mode);
     }
 
     /**

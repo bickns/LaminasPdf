@@ -177,8 +177,8 @@ class StreamObject extends IndirectObject
         }
 
         foreach ($this->_initialDictionaryData['Filter'] as $id => $filterName) {
-            $valueRef = &$this->_value->value->getRef();
-            $this->_value->value->touch();
+            $valueRef = &$this->_value->value;
+
             switch ($filterName) {
                 case 'ASCIIHexDecode':
                     $valueRef = StreamFilter\AsciiHex::decode($valueRef);
@@ -233,8 +233,7 @@ class StreamObject extends IndirectObject
         $filters = array_reverse($this->_initialDictionaryData['Filter'], true);
 
         foreach ($filters as $id => $filterName) {
-            $valueRef = &$this->_value->value->getRef();
-            $this->_value->value->touch();
+            $valueRef = &$this->_value->value;
             switch ($filterName) {
                 case 'ASCIIHexDecode':
                     $valueRef = StreamFilter\AsciiHex::encode($valueRef);
@@ -295,7 +294,7 @@ class StreamObject extends IndirectObject
                 $this->_decodeStream();
             }
 
-            return $this->_value->value->getRef();
+            return $this->_value->value;
         }
 
         throw new Exception\RuntimeException('Unknown stream object property requested.');
@@ -311,9 +310,8 @@ class StreamObject extends IndirectObject
     public function __set($property, $value)
     {
         if ($property == 'value') {
-            $valueRef = &$this->_value->value->getRef();
+            $valueRef = &$this->_value->value;
             $valueRef = $value;
-            $this->_value->value->touch();
 
             $this->_streamDecoded = true;
 

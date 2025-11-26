@@ -43,13 +43,12 @@ class StreamContentTest extends \PHPUnit\Framework\TestCase
     public function testValueAccess()
     {
         $streamObj = new InternalType\StreamContent("some text (\x00\x01\x02)\n");
-        $this->assertEquals($streamObj->value->getRef(), "some text (\x00\x01\x02)\n");
+        $this->assertEquals($streamObj->value, "some text (\x00\x01\x02)\n");
 
-        $valueRef = &$streamObj->value->getRef();
+        $valueRef = &$streamObj->value;
         $valueRef = "another text (\x02\x03\x04)\n";
-        $streamObj->value->touch();
 
-        $this->assertEquals($streamObj->value->getRef(), "another text (\x02\x03\x04)\n");
+        $this->assertEquals($streamObj->value, "another text (\x02\x03\x04)\n");
     }
 
     public function testToString()
