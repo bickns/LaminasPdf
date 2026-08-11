@@ -1,12 +1,36 @@
 <?php
 namespace LaminasPdf\Resource;
 
+use LaminasPdf\Color;
 use LaminasPdf\Exception;
 use LaminasPdf\InternalType;
 use LaminasPdf\ObjectFactory;
 
 class Shading extends AbstractResource
 {
+    /**
+     * Exponent used for the segment entering an auto-expanded plateau (e.g.
+     * darkblue -> lightblue at the left edge of a plateau). Large (>1) is
+     * the mirror image of the exit exponent - barely any visible change
+     * until right near the outer edge, then a quick snap. Tune to taste -
+     * larger = sharper.
+     */
+    private const PLATEAU_ENTRY_EXPONENT = 1.8;
+
+    /**
+     * Exponent used for the segment leaving an auto-expanded plateau (e.g.
+     * lightblue -> darkblue at the right edge of a plateau). Small (<1)
+     * makes the color change happen quickly right at the outer edge, then
+     * barely move for the rest of the zone. Tune to taste - smaller = sharper.
+     */
+    private const PLATEAU_EXIT_EXPONENT = 0.5;
+
+    /**
+     * Default, linear interpolation - used everywhere except the sharpened
+     * entry/exit segments above.
+     */
+    private const LINEAR_EXPONENT = 1.0;
+
     // Deliberately NOT calling parent::__construct() - it would allocate
     // its own factory, disconnected from the one the Function object needs to share.
     protected function __construct(InternalType\DictionaryObject $shadingDict, ObjectFactory $factory)
@@ -23,7 +47,7 @@ class Shading extends AbstractResource
      *
      * @param float $x1,$y1  Gradient axis start point
      * @param float $x2,$y2  Gradient axis end point
-     * @param array $colors  List of [r, g, b] stops (min 2), evenly spaced along the axis
+     * @param array $colors  List of 2+ color stops - see class docblock for accepted formats
      * @param bool  $extend  Extend the end colors beyond the axis endpoints
      */
     public static function axial($x1, $y1, $x2, $y2, array $colors, $extend = true)
@@ -54,7 +78,7 @@ class Shading extends AbstractResource
      *
      * @param float $x0,$y0,$r0  Inner circle (center + radius)
      * @param float $x1,$y1,$r1  Outer circle (center + radius)
-     * @param array $colors  List of [r, g, b] stops (min 2), evenly spaced from inner to outer
+     * @param array $colors  List of 2+ color stops - see class docblock for accepted formats
      * @param bool  $extend  Extend the outer color beyond r1
      */
     public static function radial($x0, $y0, $r0, $x1, $y1, $r1, array $colors, $extend = true)
@@ -84,107 +108,37 @@ class Shading extends AbstractResource
 
 
     // ===================== Convenience factories (rect-relative) =====================
-    // Moved here from Page.php - Page shouldn't need to know how a shading's
-    // geometry is derived, only how to paint one (see Page::shadeRect() /
-    // Page::drawTextWithShading()).
 
     /**
-     * Shading for a top-to-bottom gradient over the given rectangle.
+     * Shading for a gradient at an arbitrary angle over the given rectangle,
+     * matching CSS's linear-gradient(<angle>deg, ...) numeric-angle behavior.
+     *
+     * 0deg = bottom to top, increasing clockwise (90deg = left to right,
+     * 180deg = top to bottom, 270deg = right to left) - same convention as CSS.
      *
      * @param float $x1,$y1,$x2,$y2  Rectangle bounds
-     * @param array $colors  List of [r, g, b] stops (min 2) -
-     *                       e.g. [$darkBlue, $blue, $darkBlue] for a "pill" look
+     * @param array $colors  List of 2+ color stops - see class docblock for accepted formats
+     * @param float $degrees
      */
-    public static function topToBottom($x1, $y1, $x2, $y2, array $colors)
+    public static function angled($x1, $y1, $x2, $y2, array $colors, $degrees)
     {
-        return self::axial($x1, $y2, $x1, $y1, $colors);
-    }
+        $theta = deg2rad($degrees);
+        $dirX = sin($theta);
+        $dirY = cos($theta);
 
-    /**
-     * Shading for a left-to-right gradient over the given rectangle.
-     *
-     * @param float $x1,$y1,$x2,$y2  Rectangle bounds
-     * @param array $colors  List of [r, g, b] stops (min 2)
-     */
-    public static function leftToRight($x1, $y1, $x2, $y2, array $colors)
-    {
-        $midY = ($y1 + $y2) / 2;
+        $width = $x2 - $x1;
+        $height = $y2 - $y1;
 
-        return self::axial($x1, $midY, $x2, $midY, $colors);
-    }
-
-    /**
-     * Shading for a diagonal, corner-to-corner gradient over the given rectangle.
-     *
-     * The direction of travel is perpendicular to the line joining the two
-     * UNUSED corners, not the line joining the two named corners themselves -
-     * same construction CSS uses for linear-gradient(to bottom right, ...).
-     * Using the named corners directly as the axis only looks right on a
-     * square; on any other rectangle it puts the color bands at whatever odd
-     * angle that diagonal happens to be, rather than running evenly across
-     * the rect the way a brush stroke at that corner-to-corner angle would.
-     *
-     * @param float $x1,$y1,$x2,$y2  Rectangle bounds
-     * @param array $colors  List of [r, g, b] stops (min 2)
-     * @param string $direction  'TL->BR' (default), 'BR->TL', 'BL->TR', or 'TR->BL'
-     */
-    public static function cornerToCorner($x1, $y1, $x2, $y2, array $colors, $direction = 'TL->BR')
-    {
-        $tl = [$x1, $y2];
-        $tr = [$x2, $y2];
-        $br = [$x2, $y1];
-        $bl = [$x1, $y1];
-
-        switch ($direction) {
-            case 'BR->TL':
-                [$usedStart, $usedEnd] = [$br, $tl];
-                [$unusedA, $unusedB]   = [$tr, $bl];
-                break;
-            case 'BL->TR':
-                [$usedStart, $usedEnd] = [$bl, $tr];
-                [$unusedA, $unusedB]   = [$tl, $br];
-                break;
-            case 'TR->BL':
-                [$usedStart, $usedEnd] = [$tr, $bl];
-                [$unusedA, $unusedB]   = [$tl, $br];
-                break;
-            case 'TL->BR':
-            default:
-                [$usedStart, $usedEnd] = [$tl, $br];
-                [$unusedA, $unusedB]   = [$tr, $bl];
-                break;
-        }
-
-        // Direction perpendicular to the unused-corners line - this is the
-        // "brush angle". Color bands end up parallel to the unused corners;
-        // travel runs perpendicular to them.
-        $dx = $unusedB[0] - $unusedA[0];
-        $dy = $unusedB[1] - $unusedA[1];
-        $length = sqrt($dx ** 2 + $dy ** 2);
-        $perpX = -$dy / $length;
-        $perpY = $dx / $length;
-
-        // Make sure the perpendicular points from usedStart towards usedEnd
-        $towardEndX = $usedEnd[0] - $usedStart[0];
-        $towardEndY = $usedEnd[1] - $usedStart[1];
-        if (($perpX * $towardEndX + $perpY * $towardEndY) < 0) {
-            $perpX = -$perpX;
-            $perpY = -$perpY;
-        }
+        // Half-length needed so the gradient line, at this angle, still covers the full box
+        $halfLength = (abs($width * $dirX) + abs($height * $dirY)) / 2;
 
         $centerX = ($x1 + $x2) / 2;
         $centerY = ($y1 + $y2) / 2;
 
-        // Project the used corners onto the perpendicular axis through the
-        // rect's center - this is what makes the gradient reach pure color
-        // exactly at each named corner's projection, while staying centered.
-        $t1 = ($usedStart[0] - $centerX) * $perpX + ($usedStart[1] - $centerY) * $perpY;
-        $t2 = ($usedEnd[0] - $centerX) * $perpX + ($usedEnd[1] - $centerY) * $perpY;
-
-        $axisX1 = $centerX + $t1 * $perpX;
-        $axisY1 = $centerY + $t1 * $perpY;
-        $axisX2 = $centerX + $t2 * $perpX;
-        $axisY2 = $centerY + $t2 * $perpY;
+        $axisX1 = $centerX - $halfLength * $dirX;
+        $axisY1 = $centerY - $halfLength * $dirY;
+        $axisX2 = $centerX + $halfLength * $dirX;
+        $axisY2 = $centerY + $halfLength * $dirY;
 
         return self::axial($axisX1, $axisY1, $axisX2, $axisY2, $colors);
     }
@@ -192,10 +146,10 @@ class Shading extends AbstractResource
     /**
      * Shading for a radial gradient centered on the given rectangle.
      * Outer radius reaches the corners (half the diagonal) so the whole
-     * rect gets shaded.
+     * rect gets shaded. For a custom origin/radius, use radial() directly.
      *
      * @param float $x1,$y1,$x2,$y2  Rectangle bounds
-     * @param array $colors  List of [r, g, b] stops (min 2), center to edge
+     * @param array $colors  List of 2+ color stops - see class docblock for accepted formats
      */
     public static function radialCentered($x1, $y1, $x2, $y2, array $colors)
     {
@@ -207,43 +161,101 @@ class Shading extends AbstractResource
     }
 
 
-    // ===================== Function construction (private) =====================
+    // ===================== Color stop parsing =====================
+    //
+    // Each entry in $colors can be:
+    //   - [r, g, b]                    plain RGB triple, even spacing (unchanged from before)
+    //   - [[r, g, b], $percent]        RGB triple with an explicit share of the total width
+    //   - "colorname"                  resolved via Color\Html, even spacing
+    //   - "colorname 10%"              resolved via Color\Html, explicit 10% share
+    //   - "#rrggbb" / "#rrggbb 10%"    hex resolved via Color\Html - the '#' is REQUIRED,
+    //                                  Color\Html::color() does not accept bare hex
+    //
+    // Percent is a SHARE of the total axis width. Missing shares split whatever's left
+    // over evenly; the whole set is then normalized to sum to exactly 100 regardless of
+    // what was actually given, so over/under-100% totals degrade gracefully rather than
+    // throwing. Segment boundaries are placed using the AVERAGE of each segment's two
+    // neighboring stops' shares (NOT a running cumulative sum from the start), so
+    // symmetric stop patterns produce a symmetric result.
+    //
+    // A single interior stop can't be a genuine FLAT plateau by itself - with only one
+    // boundary available either side of it, its declared share only ever influences the
+    // scale of two full gradual transitions, never carves out a flat region. So: any
+    // interior stop flanked by two DIFFERENT colors is automatically expanded into three
+    // duplicate-color points - a share matching each neighbor, plus a "core" share solved
+    // algebraically so the RESULTING flat region comes out to EXACTLY this stop's declared
+    // percentage. The two real transition segments this creates (entering and leaving the
+    // plateau) use a sharpened, non-linear interpolation (PLATEAU_ENTRY_EXPONENT /
+    // PLATEAU_EXIT_EXPONENT above) rather than a plain linear ramp, so the visible color
+    // change concentrates near each outer edge instead of spreading evenly across the
+    // whole transition zone. If the target is too extreme relative to its neighbors, the
+    // stop is left as a single point (existing single-point behavior).
+    // e.g. ['darkblue', 'lightblue 80%', 'darkblue'] auto-expands to
+    //      ['darkblue 10%', 'lightblue 10%', 'lightblue 70%', 'lightblue 10%', 'darkblue 10%']
+    // with the two 10%-wide transition segments sharpened per the constants above.
 
     /**
      * Build the color Function driving a shading, from 2 or more color stops.
-     *
-     * Exactly 2 colors: a single Type 2 (exponential interpolation) function.
-     * 3+ colors: N-1 Type 2 functions chained with a Type 3 ("stitching")
-     * function across evenly-spaced sub-ranges of the [0,1] domain.
      *
      * @return InternalType\IndirectObject
      */
     private static function _buildColorFunction(ObjectFactory $factory, array $colors)
     {
+        if (count($colors) === 1) {
+            // A single color auto-expands into a subtle lighter -> base -> darker
+            // transition, via the same lightness-based shading Color\Html::shades() uses.
+            $colors = Color\Html::shades($colors[0]);
+        }
+
         $stopCount = count($colors);
 
         if ($stopCount < 2) {
             throw new Exception\InvalidArgumentException('Shading requires at least 2 colors.');
         }
 
+        $parsedStops = array_map([self::class, '_parseColorStop'], $colors);
+        $rgbColors = array_column($parsedStops, 'rgb');
+
         if ($stopCount === 2) {
-            return self::_buildType2Function($factory, $colors[0], $colors[1]);
+            // Percent is meaningless for a straight 2-stop gradient - a single
+            // segment spans the whole domain regardless of any weighting.
+            return self::_buildType2Function($factory, $rgbColors[0], $rgbColors[1]);
         }
 
-        $segmentCount = $stopCount - 1;
+        $percents = self::_resolveStopPercents($parsedStops);
+
+        [$rgbColors, $percents, $segmentExponents] = self::_expandPlateauStops($rgbColors, $percents);
+
+        $segmentCount = count($rgbColors) - 1;
+
+        // Each segment's width is the AVERAGE of its two endpoint stops' shares,
+        // then rescaled so all segment widths sum to exactly 100.
+        $segmentWidths = [];
+        for ($i = 0; $i < $segmentCount; $i++) {
+            $segmentWidths[$i] = ($percents[$i] + $percents[$i + 1]) / 2;
+        }
+        $widthTotal = array_sum($segmentWidths);
+        $scale = $widthTotal > 0 ? 100 / $widthTotal : 100 / $segmentCount;
 
         $subFunctions = new InternalType\ArrayObject();
         $bounds = new InternalType\ArrayObject();
         $encode = new InternalType\ArrayObject();
 
+        $cumulative = 0;
         for ($i = 0; $i < $segmentCount; $i++) {
-            $subFunctions->items[] = self::_buildType2Function($factory, $colors[$i], $colors[$i + 1]);
+            $subFunctions->items[] = self::_buildType2Function(
+                $factory,
+                $rgbColors[$i],
+                $rgbColors[$i + 1],
+                $segmentExponents[$i] ?? self::LINEAR_EXPONENT
+            );
 
             $encode->items[] = new InternalType\NumericObject(0);
             $encode->items[] = new InternalType\NumericObject(1);
 
             if ($i < $segmentCount - 1) {
-                $bounds->items[] = new InternalType\NumericObject(($i + 1) / $segmentCount);
+                $cumulative += $segmentWidths[$i] * $scale;
+                $bounds->items[] = new InternalType\NumericObject($cumulative / 100);
             }
         }
 
@@ -261,9 +273,183 @@ class Shading extends AbstractResource
     }
 
     /**
-     * Build a single Type 2 (exponential interpolation) function between two colors.
+     * Auto-expand any interior stop that has enough share to warrant a real flat
+     * plateau (see class docblock). Stops already part of a same-color run, or
+     * at either end of the array, are left untouched.
+     *
+     * Also returns per-segment exponent overrides: the segment entering an
+     * expanded plateau gets PLATEAU_ENTRY_EXPONENT, the segment leaving it gets
+     * PLATEAU_EXIT_EXPONENT, everything else stays LINEAR_EXPONENT.
+     *
+     * @param array $rgbColors  List of [r,g,b] triples
+     * @param array $percents   Resolved percents (same count as $rgbColors, sums to 100)
+     * @return array [expandedRgbColors, expandedPercents, segmentExponents]
      */
-    private static function _buildType2Function(ObjectFactory $factory, array $c0Rgb, array $c1Rgb)
+    private static function _expandPlateauStops(array $rgbColors, array $percents)
+    {
+        $count = count($rgbColors);
+        $expandedRgb = [];
+        $expandedPercents = [];
+        $segmentExponents = [];
+        $pendingExponent = self::LINEAR_EXPONENT;
+
+        $pushStop = function ($color, $percent) use (
+            &$expandedRgb,
+            &$expandedPercents,
+            &$segmentExponents,
+            &$pendingExponent
+        ) {
+            if (count($expandedRgb) > 0) {
+                $segmentExponents[] = $pendingExponent;
+                $pendingExponent = self::LINEAR_EXPONENT;
+            }
+            $expandedRgb[] = $color;
+            $expandedPercents[] = $percent;
+        };
+
+        for ($i = 0; $i < $count; $i++) {
+            $ownColor = $rgbColors[$i];
+            $targetPercent = $percents[$i]; // desired share of the FINAL rendered width
+
+            $isFirst = ($i === 0);
+            $isLast = ($i === $count - 1);
+            $sameAsLeft = !$isFirst && $rgbColors[$i] === $rgbColors[$i - 1];
+            $sameAsRight = !$isLast && $rgbColors[$i] === $rgbColors[$i + 1];
+
+            if ($isFirst || $isLast || $sameAsLeft || $sameAsRight) {
+                $pushStop($ownColor, $targetPercent);
+                continue;
+            }
+
+            $leftPercent = $percents[$i - 1];
+            $rightPercent = $percents[$i + 1];
+            $sumOuter = $leftPercent + $rightPercent;
+
+            $denominator = 100 - $targetPercent;
+            $corePercent = $denominator > 0
+                ? $sumOuter * (1.5 * $targetPercent - 50) / $denominator
+                : 0;
+
+            if ($corePercent <= 0) {
+                // Not enough share to justify a real plateau - leave as a single point
+                $pushStop($ownColor, $targetPercent);
+                continue;
+            }
+
+            // Entering the plateau: sharpen so the change happens right at the edge
+            $pendingExponent = self::PLATEAU_ENTRY_EXPONENT;
+            $pushStop($ownColor, $leftPercent);
+
+            // Flat interior - exponent is irrelevant since C0 == C1
+            $pushStop($ownColor, $corePercent);
+            $pushStop($ownColor, $rightPercent);
+
+            // Leaving the plateau: sharpen the upcoming segment the same way, mirrored
+            $pendingExponent = self::PLATEAU_EXIT_EXPONENT;
+        }
+
+        return [$expandedRgb, $expandedPercents, $segmentExponents];
+    }
+
+    /**
+     * Parse one color-stop entry into ['rgb' => [r,g,b], 'percent' => float|null].
+     */
+    private static function _parseColorStop($stop)
+    {
+        if (is_string($stop)) {
+            $stop = trim($stop);
+
+            if (preg_match('/^(.*?)\s+(-?\d+(?:\.\d+)?)%\s*$/', $stop, $matches)) {
+                $colorSpec = trim($matches[1]);
+                $percent = (float) $matches[2];
+            } else {
+                $colorSpec = $stop;
+                $percent = null;
+            }
+
+            $resolved = Color\Html::color($colorSpec);
+            $components = $resolved->getComponents();
+
+            // Html::color() returns GrayScale (1 component) whenever r==g==b,
+            // e.g. "black"/"white"/"gray" or a hex like #808080 - but the
+            // shading dict is always built as DeviceRGB, so a 1-component
+            // result needs expanding to a triple, not passed through as-is.
+            if (count($components) === 1) {
+                $gray = $components[0];
+                $rgb = [$gray, $gray, $gray];
+            } else {
+                $rgb = $components;
+            }
+
+            return ['rgb' => $rgb, 'percent' => $percent];
+        }
+
+        if (is_array($stop)) {
+            // [[r,g,b], percent] pair
+            if (isset($stop[0]) && is_array($stop[0])) {
+                return ['rgb' => $stop[0], 'percent' => $stop[1] ?? null];
+            }
+            // plain [r,g,b] triple
+            return ['rgb' => $stop, 'percent' => null];
+        }
+
+        throw new Exception\InvalidArgumentException(
+            'Each color stop must be an [r,g,b] array, an [[r,g,b], percent] pair, '
+            . 'or a "colorname" / "colorname N%" string (hex needs a leading #).'
+        );
+    }
+
+    /**
+     * Resolve a parsed stop list's percentages: fill in blanks by splitting
+     * whatever's left evenly, then normalize the whole set to sum to exactly
+     * 100 - this is what makes over/under-100% input totals non-fatal.
+     *
+     * @return float[]
+     */
+    private static function _resolveStopPercents(array $parsedStops)
+    {
+        $count = count($parsedStops);
+        $percents = [];
+        $explicitSum = 0;
+        $nullIndexes = [];
+
+        foreach ($parsedStops as $i => $stop) {
+            if ($stop['percent'] === null) {
+                $percents[$i] = null;
+                $nullIndexes[] = $i;
+            } else {
+                $p = max(0, (float) $stop['percent']); // no negative shares
+                $percents[$i] = $p;
+                $explicitSum += $p;
+            }
+        }
+
+        if (count($nullIndexes) > 0) {
+            $remaining = max(0, 100 - $explicitSum);
+            $share = $remaining / count($nullIndexes);
+            foreach ($nullIndexes as $i) {
+                $percents[$i] = $share;
+            }
+        }
+
+        $total = array_sum($percents);
+
+        if ($total <= 0) {
+            // Degenerate case (e.g. every stop given 0%) - fall back to an even split
+            return array_fill(0, $count, 100 / $count);
+        }
+
+        $scale = 100 / $total;
+        return array_map(fn($p) => $p * $scale, $percents);
+    }
+
+    /**
+     * Build a single Type 2 (exponential interpolation) function between two colors.
+     *
+     * @param float $exponent  PDF's /N - 1.0 is linear, <1 concentrates change
+     *                         near the start, >1 concentrates it near the end.
+     */
+    private static function _buildType2Function(ObjectFactory $factory, array $c0Rgb, array $c1Rgb, $exponent = 1.0)
     {
         $function = new InternalType\DictionaryObject();
         $function->FunctionType = new InternalType\NumericObject(2);
@@ -279,7 +465,7 @@ class Shading extends AbstractResource
             fn($c) => new InternalType\NumericObject($c),
             $c1Rgb
         ));
-        $function->N = new InternalType\NumericObject(1);
+        $function->N = new InternalType\NumericObject($exponent);
 
         return $factory->newObject($function);
     }

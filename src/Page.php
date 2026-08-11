@@ -1262,6 +1262,36 @@ class Page
     }
 
     /**
+     * Draw a circle centered on x, y with a radius of radius, filled by a
+     * shading instead of a flat color.
+     *
+     * Just clipCircle() + paint, same relationship drawRectangleWithShading()
+     * has to clipRectangle()/drawRectangle().
+     *
+     * @param Resource\Shading $shading
+     * @param float $x
+     * @param float $y
+     * @param float $radius
+     * @param float $startAngle  Starting angle in radians (optional - full circle if omitted)
+     * @param float $endAngle    Ending angle in radians
+     * @return \LaminasPdf\Page
+     */
+    public function drawCircleWithShading(Resource\Shading $shading, $x, $y, $radius, $startAngle = null, $endAngle = null)
+    {
+        $this->drawEllipseWithShading(
+            $shading,
+            $x - $radius,
+            $y - $radius,
+            $x + $radius,
+            $y + $radius,
+            $startAngle,
+            $endAngle
+        );
+
+        return $this;
+    }
+   
+    /**
      * Draw an ellipse inside the specified rectangle.
      *
      * Method signatures:
@@ -1391,6 +1421,37 @@ class Page
         if ($startAngle !== null) {
             $this->_contents .= "Q\n";
         }
+
+        return $this;
+    }
+
+    /**
+     * Draw an ellipse inside the specified rectangle, filled by a shading
+     * instead of a flat color.
+     *
+     * Reuses clipEllipse() for the path/clip construction (including its
+     * optional pie-slice angular clip) rather than duplicating the Bezier
+     * curve math here - this method is just: open a scope, clip to the
+     * ellipse (or arc), paint the shading through it, close the scope.
+     *
+     * @param Resource\Shading $shading
+     * @param float $x1,$y1,$x2,$y2
+     * @param float $startAngle  Starting angle in radians (optional - full ellipse if omitted)
+     * @param float $endAngle    Ending angle in radians
+     * @return \LaminasPdf\Page
+     */
+    public function drawEllipseWithShading(Resource\Shading $shading, $x1, $y1, $x2, $y2, $startAngle = null, $endAngle = null)
+    {
+        $this->_addProcSet('PDF');
+
+        $this->_contents .= "q\n";
+        $this->clipEllipse($x1, $y1, $x2, $y2, $startAngle, $endAngle);
+
+        $shadingName = $this->_attachResource('Shading', $shading);
+        $shadingNameObj = new InternalType\NameObject($shadingName);
+        $this->_contents .= $shadingNameObj->toString() . " sh\n";
+
+        $this->_contents .= "Q\n";
 
         return $this;
     }
